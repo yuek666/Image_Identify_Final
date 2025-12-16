@@ -9,9 +9,10 @@ import os
 # --- 設定參數 ---
 MODEL_PATH = 'finger_model_pytorch.pth' # 請確認檔名與訓練時一致
 INPUT_DIR = './input'                   # 測試圖片資料夾
+OUTPUT_DIR = './output'                 # <--- 新增：輸出圖片資料夾
 CLASSES = ['0', '1', '2', '3', '4', '5'] 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-DISPLAY_WIDTH = 800  # 限制顯示視窗寬度，避免圖片太大爆框
+DISPLAY_WIDTH = 800  # 限制顯示視窗寬度
 
 def load_trained_model():
     print(f"正在載入模型... (使用裝置: {DEVICE})")
@@ -32,7 +33,7 @@ def load_trained_model():
         return None
 
     model = model.to(DEVICE)
-    model.eval() # 設定為推論模式 (重要！)
+    model.eval() # 設定為推論模式
     return model
 
 def predict_from_folder():
@@ -41,12 +42,16 @@ def predict_from_folder():
         print(f"錯誤：找不到 {INPUT_DIR} 資料夾")
         return
 
+    # <--- 新增：檢查 output 資料夾，不存在則建立 --->
+    if not os.path.exists(OUTPUT_DIR):
+        os.makedirs(OUTPUT_DIR)
+        print(f"已建立輸出資料夾: {OUTPUT_DIR}")
+
     # 載入模型
     model = load_trained_model()
     if model is None: return
 
-    # 定義預處理 (必須跟訓練時一樣)
-    # OpenCV 讀進來是 BGR，轉成 PIL (RGB) 後再做 Transform
+    # 定義預處理
     preprocess = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
@@ -70,7 +75,7 @@ def predict_from_folder():
         img_bgr = cv2.imread(file_path)
         if img_bgr is None: continue
 
-        # --- 顯示用的縮放處理 (避免圖太大) ---
+        # --- 顯示用的縮放處理 ---
         h, w = img_bgr.shape[:2]
         if w > DISPLAY_WIDTH:
             scale = DISPLAY_WIDTH / w
@@ -80,11 +85,9 @@ def predict_from_folder():
             display_img = img_bgr.copy()
 
         # --- 2. 轉換格式給 PyTorch 模型 ---
-        # OpenCV (BGR) -> RGB -> PIL Image
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(img_rgb)
         
-        # 預處理 -> 增加 Batch 維度 [1, 3, 224, 224] -> 搬到 GPU/CPU
         input_tensor = preprocess(pil_img)
         input_batch = input_tensor.unsqueeze(0).to(DEVICE)
 
@@ -98,7 +101,7 @@ def predict_from_folder():
         predicted_label = CLASSES[top_class.item()]
         confidence = top_prob.item() * 100
 
-        # --- 4. 顯示結果 ---
+        # --- 4. 顯示結果並存檔 ---
         print(f"檔案: {filename} -> {predicted_label} ({confidence:.2f}%)")
         
         # 根據信心度變色
@@ -106,6 +109,11 @@ def predict_from_folder():
         
         text = f"Pred: {predicted_label} ({confidence:.1f}%)"
         cv2.putText(display_img, text, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+
+        # <--- 新增：將畫好結果的圖片存檔 --->
+        save_path = os.path.join(OUTPUT_DIR, filename)
+        cv2.imwrite(save_path, display_img)
+        print(f"   └─ 已儲存至: {save_path}")
 
         cv2.imshow('PyTorch Prediction', display_img)
 
